@@ -5,7 +5,9 @@ import dash_html_components as html
 import dash_core_components as dcc
 import dash_table as dt
 import pandas as pd
+import numpy as np
 import plotly.express as px
+import json
 
 
 
@@ -37,6 +39,12 @@ markdown_text = '''
 - [Dash Bootstrap Components](https://dash-bootstrap-components.opensource.faculty.ai/docs/components/)  
 '''
 
+
+def slider_map(min, max, steps=10):
+    scale = np.logspace(np.log10(min), np.log10(max), steps, endpoint=False)
+    return {i/10: '{}'.format(round(scale[i],2)) for i in range(steps)}
+
+
 table_tab= dt.DataTable(
                 id='my-table',
                 columns=[{"name": i, "id": i} for i in df.columns],
@@ -66,14 +74,17 @@ app.layout = html.Div([
 
     html.Label(["Range of values for body weight:", 
                  dcc.RangeSlider(
-                     max= max_bodywt,
-                     min= min_bodywt,
-                     step= (max_bodywt - min_bodywt)/10,
-                     marks= {'{}'.format(min_bodywt + (max_bodywt - min_bodywt)/10 * i): '{}'.format(round(min_bodywt + (max_bodywt - min_bodywt)/10 * i,2)) for i in range(10)},
-                     value= [min_bodywt,max_bodywt],
+                     id="range",
+                     max=1,
+                     min= 0,
+                     step= 1/100,
+                     marks= slider_map(min_bodywt, max_bodywt),
+                     value= [0,1],
                  )
     ]),
      
+    html.Div(id="data", style={'display':'none', "backgroundColor":"yellow"}),
+    html.Div(id='dataRange', style={'display': 'none'}),
     dcc.Tabs(id="tabs", value='tab-t', children=[
             dcc.Tab(label='Table', value='tab-t'),
             dcc.Tab(label='Graph', value='tab-g'),
@@ -85,32 +96,57 @@ app.layout = html.Div([
 
     ])
 
- 
+
+@app.callback(Output('tabs-content', 'children'),
+              Input('tabs', 'value'))
+def render_content(tab):
+    if tab == 'tab-t':
+        return table_tab
+    elif tab == 'tab-g':
+        return graph_tab
 
 @app.callback(
      Output('my-table', 'data'),
-     Input('my-dropdown', 'value'))
-def update_data(values):
-    filter = df['vore'].isin(values)
-    return df[filter].to_dict("records")
+     Input('data', 'children'), 
+     State('tabs', 'value'))
+def update_table(data, tab):
+    if tab != 'tab-t':
+        return None
+    dff = pd.read_json(data, orient='split')
+    return dff.to_dict("records")
 
 @app.callback(
      Output('my-graph', 'figure'),
-     Input('my-dropdown', 'value'))
+     Input('my-dropdown', 'value'),
+     State('tabs', 'value'))
 
-def update_figure (values):
-    filter = df['vore'].isin(values)
-    return px.scatter(df[filter], x="bodywt", y="sleep_total", color="vore",color_discrete_map=col_vore)
+def update_graph(data, tab):
+    if tab != 'tab-g':
+        return None
+    dff = pd.read_json(data, orient='split')
+    return px.scatter(dff, x="bodywt", y="sleep_total", color="vore",
+    #color_discrete_sequence=px.colors.qualitative.G10
+    color_discrete_map=col_vore)
+
+@app.callback(Output('data', 'children'), 
+    Input('range', 'value'), 
+    State('my-dropdown', 'value'))
+def filter(range, values):
+     filter = df['vore'].isin(values) & df['bodywt'].between(min_bodywt * (max_bodywt/min_bodywt) ** range[0], min_bodywt * (max_bodywt/min_bodywt) ** range[1])
+
+     # more generally, this line would be
+     # json.dumps(cleaned_df)
+     return df[filter].to_json(date_format='iso', orient='split')
 
 
-@app.callback(
-     Output('tabs-content', 'children'),
-     Input('tabs', 'value'))
-
-def render_content(v):
-    if v == 'tab-g':
-       return graph_tab
-    return table_tab
+@app.callback(Output('dataRange', 'children'), 
+    Input('my-dropdown', 'value'))
+def dataRange(values):
+    filter = df['vore'].isin(values) 
+    dff = df[filter]
+    min_bodywt = min(dff['bodywt'].dropna())
+    max_bodywt = max(dff['bodywt'].dropna())
+    return json.dumps({'min_bodywt': min_bodywt, 'max_bodywt': max_bodywt})
 
 
 
